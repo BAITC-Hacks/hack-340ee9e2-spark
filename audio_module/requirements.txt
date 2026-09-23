@@ -1,1 +1,8 @@
 faster-whisper==1.2.1
+# Tested on Python 3.13 / macOS arm64; no PyTorch or diarization dependencies.
+ctranslate2==4.8.2
+av==18.1.0
+onnxruntime==1.30.0
+huggingface-hub==1.32.0
+tokenizers==0.23.2
+numpy==2.5.3

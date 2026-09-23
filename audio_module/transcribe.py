@@ -92,6 +92,10 @@ def transcribe_mp3(
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
     os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
+    os.environ["ORT_DISABLE_TELEMETRY"] = "1"
+    import onnxruntime
+
+    onnxruntime.disable_telemetry_events()
     from faster_whisper import WhisperModel
 
     audio, source_duration, truncated = _decode_mp3(path, max_seconds)

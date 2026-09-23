@@ -260,8 +260,9 @@ class APITests(unittest.TestCase):
         self.assertIn('WHISPER_MODEL_DIR',response.text)
 
     def test_audio_file_validation(self):
-        self.assertEqual(self.client.post('/transcribe',files={'file':('a.txt',b'x')}).status_code,415)
+        self.assertEqual(self.client.post('/transcribe',files={'file':('a.txt',b'x','audio/mpeg')}).status_code,415)
         self.assertEqual(self.client.post('/transcribe',files={'file':('a.mp3',b'')}).status_code,422)
+        self.assertEqual(self.client.post('/transcribe',files={'file':('a.mpeg',b'','audio/mpeg')}).status_code,422)
         self.assertEqual(self.client.post('/transcribe').status_code,422)
         self.assertEqual(self.client.post('/transcribe?language=xx',files={'file':('a.mp3',b'x')}).status_code,422)
         with patch('backend.main.MAX_UPLOAD_BYTES',4):
@@ -273,18 +274,26 @@ class APITests(unittest.TestCase):
             def transcribe(self,path,*,language=None):
                 paths.append(path)
                 assert path.read_bytes()==b'test audio bytes'
+                assert path.name=='upload.mp3'
                 assert language=='ru'
                 return TranscriptionResult(text='Айнур Каировна, проверьте договор.',
                     transcript=[{'speaker':'Speaker 2','start':1.0,'end':3.0,'text':'Айнур Каировна, проверьте договор.'}],
                     language='ru',diarization_available=True,warnings=[])
         app.dependency_overrides[get_transcriber]=lambda:FakeAudio()
-        response = self.client.post('/analyze-audio?language=ru',files={'file':('../../evil.mp3',b'test audio bytes')})
-        self.assertEqual(response.status_code,200,response.text)
-        self.assertTrue(response.json()['diarization_available'])
-        protocol=response.json()['protocol']
-        self.assertEqual(protocol['action_items'][0]['responsible'],'Айнур Каировна')
-        self.assertEqual(protocol['transcript'][0]['speaker'],'Speaker 2')
-        self.assertEqual(self.client.post('/export-docx',json=protocol).status_code,200)
+        for route in ('/transcribe','/analyze-audio'):
+            for name in ('../../evil.mp3','meeting.mpeg','MEETING.MPEG'):
+                with self.subTest(route=route,filename=name):
+                    response = self.client.post(route+'?language=ru',
+                        files={'file':(name,b'test audio bytes','audio/mpeg')})
+                    self.assertEqual(response.status_code,200,response.text)
+                    self.assertTrue(response.json()['diarization_available'])
+                    if route=='/analyze-audio':
+                        protocol=response.json()['protocol']
+                        self.assertEqual(protocol['action_items'][0]['responsible'],'Айнур Каировна')
+                        self.assertEqual(protocol['transcript'][0]['speaker'],'Speaker 2')
+                        self.assertEqual(self.client.post('/export-docx',json=protocol).status_code,200)
+                    else:
+                        self.assertEqual(response.json()['transcript'][0]['speaker'],'Speaker 2')
         self.assertTrue(all(not p.exists() for p in paths))
 
     def test_audio_error_and_cleanup(self):

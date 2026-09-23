@@ -93,11 +93,14 @@ def analyze(request: AnalyzeRequest) -> MeetingProtocol:
 async def _transcribe(file: UploadFile, language: str | None, transcriber) -> TranscriptionResult:
     suffix = Path(file.filename or '').suffix.lower()
     try:
-        if suffix not in {'.mp3','.wav','.m4a'}:
-            raise HTTPException(415,'Поддерживаются MP3, WAV и M4A.')
+        if suffix not in {'.mp3','.mpeg','.wav','.m4a'}:
+            raise HTTPException(415,'Поддерживаются MP3, MPEG-аудио, WAV и M4A.')
         # Never use the supplied filename as a filesystem path.
         with TemporaryDirectory(prefix='hackalem-audio-') as directory:
-            path = Path(directory) / ('upload' + suffix)
+            # MPEG audio may be named .mpeg. Normalize this alias for adapters
+            # that require .mp3 filenames; actual decoding still checks the bytes.
+            stored_suffix = '.mp3' if suffix == '.mpeg' else suffix
+            path = Path(directory) / ('upload' + stored_suffix)
             size = 0
             with path.open('wb') as target:
                 while chunk := await file.read(1024 * 1024):

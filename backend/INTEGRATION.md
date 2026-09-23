@@ -42,7 +42,9 @@ Do not send a language query in team mode: the inspected function has no languag
 parameter, so the bridge returns 422 instead of silently ignoring the override.
 Missing team module/model → 503. The team function conflates decoding and runtime
 errors under RuntimeError; those failures produce a generic 500. The standalone
-adapter distinguishes invalid decoded audio (422). Team mode only supports MP3/WAV.
+adapter distinguishes invalid decoded audio (422). The team function accepts
+MP3/WAV filenames; the upload route also accepts `.mpeg` with `audio/mpeg` and
+passes an unchanged temporary copy named `.mp3` to that function.
 
 The bridge maps real segments to TranscriptSegment and retains supplied speaker,
 start, end, text. Missing speaker stays null. An explicit diarization_available

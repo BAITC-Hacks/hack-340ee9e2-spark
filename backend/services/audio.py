@@ -79,7 +79,7 @@ class LocalWhisperTranscriber:
                     segments.append(TranscriptSegment(speaker=None, start=float(chunk.start),
                                                       end=float(chunk.end), text=text))
             except FFmpegError as exc:
-                raise InvalidAudioError('Не удалось прочитать аудио. Нужен корректный MP3, WAV или M4A.') from exc
+                raise InvalidAudioError('Не удалось прочитать аудио. Нужен корректный MP3, MPEG-аудио, WAV или M4A.') from exc
             if not segments:
                 raise NoSpeechError()
             return TranscriptionResult(text='\n'.join(s.text for s in segments), transcript=segments,

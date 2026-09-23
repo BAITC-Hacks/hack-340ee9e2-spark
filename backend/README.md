@@ -109,7 +109,14 @@ join adjacent ASR chunks with spaces while retaining their words.
 ## Audio contract
 
 `POST /transcribe` and `POST /analyze-audio` accept multipart/form-data, field `file`.
-The standalone adapter supports MP3/WAV/M4A. Optional query `language=ru` or `kk`;
+Uploads support `.mp3`, `.mpeg`, `.wav`, and `.m4a` (case-insensitive).
+The file part may use `audio/mpeg` for both `.mp3` and `.mpeg`. The request itself
+must remain `multipart/form-data`; when using browser FormData, let the browser
+set Content-Type and its boundary. MIME type alone does not prove valid audio.
+The backend stores `.mpeg` uploads temporarily as `.mp3` without changing bytes,
+so adapters with MP3 filename checks remain compatible. The decoder validates
+the content; a corrupt `.mpeg` is rejected rather than treated as recognized speech.
+Optional query `language=ru` or `kk`;
 omit it to auto-detect. `/analyze-audio` also accepts optional query `title`.
 
 ```bash

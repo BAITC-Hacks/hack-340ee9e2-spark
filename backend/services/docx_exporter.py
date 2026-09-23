@@ -3,7 +3,8 @@ from io import BytesIO
 
 from docx import Document
 from docx.oxml import OxmlElement
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Pt, RGBColor
+from docx.oxml.ns import qn
 
 from backend.schemas import MeetingProtocol
 
@@ -19,6 +20,12 @@ def export_protocol_docx(protocol: MeetingProtocol) -> bytes:
     normal = document.styles["Normal"]
     normal.font.name = "Arial"
     normal.font.size = Pt(10)
+    for name in ("Title", "Subtitle", "Heading 1"):
+        document.styles[name].font.color.rgb = RGBColor(0, 0, 0)
+        properties = document.styles[name].element.find(qn("w:pPr"))
+        if properties is not None:
+            for border in list(properties.findall(qn("w:pBdr"))):
+                properties.remove(border)
     document.core_properties.author = ""
     document.core_properties.title = "Meeting Protocol"
     document.add_heading("Meeting Protocol", 0)
@@ -30,7 +37,7 @@ def export_protocol_docx(protocol: MeetingProtocol) -> bytes:
     table = document.add_table(rows=1, cols=4)
     table.style = "Table Grid"
     table.autofit = False
-    widths = (7, 4.5, 3.5, 2)
+    widths = (6, 4, 3.5, 3.5)
     for column, width in zip(table.columns, widths):
         column.width = Cm(width)
     for cell, label, width in zip(table.rows[0].cells, ("Action Item", "Responsible", "Deadline", "Confidence"), widths):

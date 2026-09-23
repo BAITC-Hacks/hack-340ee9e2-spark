@@ -1,184 +1,214 @@
-# HackAlem AI: offline protocol API
+# HackAlem AI backend
 
-Run commands from the repository root using Python 3.11 or newer:
+Local FastAPI backend for prepared transcript analysis, audio transcription, protocol
+assembly, and DOCX export. No cloud AI, database, authentication, or meeting-platform
+integration. Startup and text analysis do not import `ai/`, faster-whisper, or PyAV.
+
+## Install and start
+
+From the repository root, use Python 3.11 or 3.12 for audio dependency compatibility:
 
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 uvicorn backend.main:app --reload
 ```
 
-If `.venv` already exists, activate it rather than recreating it. Keep `python`,
-`pip`, and `uvicorn` in that same environment; this machine has multiple Python
-installations, and an unactivated `python3` may not have the installed packages.
+Activate an existing environment instead of recreating it. Keep Python, pip, and
+Uvicorn in the same environment. For text/API/DOCX only, install
+`requirements-backend.txt`; the audio model is optional. The shared requirements
+retain the audio participant's faster-whisper dependency and existing httpx.
 
-Health: http://127.0.0.1:8000/health
+- Health: http://127.0.0.1:8000/health → HTTP 200 `{"status":"ok"}`
+- Swagger: http://127.0.0.1:8000/docs
+- Local schema: http://127.0.0.1:8000/openapi.json
 
-Swagger: http://127.0.0.1:8000/docs
+Swagger's default JavaScript/CSS use a CDN. When fully disconnected, use curl or
+the smoke script; meeting processing itself is local. If port 8000 is occupied,
+use `--port 8001` and adjust URLs. No model is loaded by `/health`.
 
-If port 8000 is occupied, use `--port 8001` and update the URLs accordingly.
-The shared requirements include the audio team's dependencies; the backend itself
-uses FastAPI, Uvicorn, Pydantic and python-docx. Tests also use httpx.
-Processing uses local Python rules, with no AI API, Ollama server, model download,
-database, or disk storage of meeting content. Package installation needs internet
-unless dependencies are already available locally.
+## Model provisioning, separate from meeting processing
 
-## API contract
+Use an existing CTranslate2 faster-whisper directory, or explicitly download public
+weights once before processing private recordings:
 
-All JSON bodies use `Content-Type: application/json`. Unknown properties are
-rejected. Validation errors return HTTP 422 with `{"detail": [...]}`; error entries
-contain `loc`, `msg`, and `type`, without the submitted meeting text.
-
-### GET /health
-
-HTTP 200, `application/json`:
-
-```json
-{"status": "ok"}
+```bash
+python backend/scripts/download_model.py --model small --output models/faster-whisper-small
+export WHISPER_MODEL_DIR="$PWD/models/faster-whisper-small"
+export HF_HUB_OFFLINE=1
+export HF_HUB_DISABLE_TELEMETRY=1
+uvicorn backend.main:app --reload
 ```
 
-### POST /analyze
+The download script never reads meeting files. Do not enable HF_HUB_OFFLINE during
+the initial download. For an isolated machine, transfer the complete model directory
+and dependency wheels beforehand. No private token is required.
 
-Send exactly one of `text` or `transcript`. `title` is optional and defaults to
-null. A provided title must be nonblank.
+Runtime requires `model.bin`, `config.json`, and `tokenizer.json`; keep all model
+vocabulary/configuration files too. A `.pt` checkpoint is not sufficient. The
+adapter uses the explicit directory with `local_files_only=True`, disables ONNX
+telemetry, and performs no model download. Missing/incomplete model → HTTP 503 for
+audio only. CPU INT8, four CPU threads, one inference at a time. A concurrent audio
+request gets 503 with Retry-After rather than starting another inference.
 
-```json
-{"text": "Айнур Каировна, проверьте договор с подрядчиком."}
+## Configuration
+
+| Variable | Purpose |
+|---|---|
+| `WHISPER_MODEL_DIR` | Explicit local model directory for the default standalone adapter |
+| `WHISPER_MODEL_PATH` | Fallback for standalone; required by the optional team adapter |
+| `BACKEND_AUDIO_ADAPTER` | `standalone` (default) or `team` |
+| `FRONTEND_ORIGINS` | Exact browser origins separated by commas; unset means use a same-origin proxy |
+| `HF_HUB_OFFLINE` | Set to `1` during processing |
+| `HF_HUB_DISABLE_TELEMETRY` | Set to `1` during processing |
+
+`.env` is not automatically loaded. Set variables before starting the server and
+restart it after changing configuration. No credentials are needed. Wildcard CORS
+origins are rejected. Example:
+
+```bash
+export FRONTEND_ORIGINS='http://localhost:5173,http://127.0.0.1:5173'
 ```
 
-Alternatively, send structured segments:
+## Text contract
+
+`POST /analyze`, application/json. Supply exactly one source:
 
 ```json
-{
-  "title": "Проверка договоров",
-  "transcript": [
-    {
-      "speaker": "Speaker 1",
-      "start": 0.0,
-      "end": 5.0,
-      "text": "Айнур Каировна, проверьте договор с подрядчиком."
-    }
-  ]
-}
+{"text":"Айнур Каировна, проверьте договор с подрядчиком."}
 ```
 
-`text` is required within each segment. `speaker`, `start`, and `end` may be
-omitted or null. Timestamps are finite nonnegative seconds; `end >= start` when
-both are present. Text must be nonblank. The input limit is 100,000 text characters
-in total and 2,000 structured segments. Oversized inputs are rejected, not truncated.
+or:
 
-The first request returns HTTP 200 with this MeetingProtocol:
+```json
+{"title":"Совещание","transcript":[{"speaker":"Speaker 1","start":0.0,"end":5.0,"text":"Айнур Каировна, проверьте договор с подрядчиком."}]}
+```
+
+Text is nonblank, maximum 100,000 characters total. Up to 2,000 segments/nonblank
+lines. `title` is optional/null, at most 200 characters. Speaker and timestamps may
+be null or omitted. Timestamps are finite nonnegative seconds with end >= start.
+Unknown fields and XML-invalid control characters are rejected with 422.
+
+Response: HTTP 200, the MeetingProtocol itself:
 
 ```json
 {
   "title": null,
   "summary": "Айнур Каировна, проверьте договор с подрядчиком.",
-  "transcript": [
-    {
-      "speaker": null,
-      "start": null,
-      "end": null,
-      "text": "Айнур Каировна, проверьте договор с подрядчиком."
-    }
-  ],
-  "action_items": [
-    {
-      "text": "Проверить договор с подрядчиком",
-      "responsible": "Айнур Каировна",
-      "deadline": null,
-      "source_fragment": "Айнур Каировна, проверьте договор с подрядчиком.",
-      "confidence": 0.75
-    }
-  ]
+  "transcript": [{"speaker":null,"start":null,"end":null,"text":"Айнур Каировна, проверьте договор с подрядчиком."}],
+  "action_items": [{"text":"Проверить договор с подрядчиком","responsible":"Айнур Каировна","deadline":null,"source_fragment":"Айнур Каировна, проверьте договор с подрядчиком.","confidence":0.75}]
 }
 ```
 
-Absent owners and deadlines remain JSON null. Confidence is a heuristic score
-between 0 and 1, not a calibrated probability. No recognized tasks returns
-`action_items: []`. Structured segment metadata is preserved. Plain text is split
-by lines; a recognized `Name:` prefix sets the speaker for subsequent lines until
-the next recognized prefix. Plain text has no inferred timestamps.
+Unknown responsible person and deadline are null, never inferred from the speaker.
+No recognized assignments → action_items: []. Plain text recognizes Name:, Speaker
+1:, and Спикер 1: prefixes; structured metadata is preserved. Source fragments may
+join adjacent ASR chunks with spaces while retaining their words.
 
-### POST /export-docx
+## Audio contract
 
-Send the complete MeetingProtocol returned by `/analyze` as the JSON body (no
-wrapper). It may also contain user-reviewed corrections. `summary`, `transcript`,
-and `action_items` are required. Each action requires nonblank `text` and
-`source_fragment`; responsible, deadline, and confidence may be null.
+`POST /transcribe` and `POST /analyze-audio` accept multipart/form-data, field `file`.
+The standalone adapter supports MP3/WAV/M4A. Optional query `language=ru` or `kk`;
+omit it to auto-detect. `/analyze-audio` also accepts optional query `title`.
 
-HTTP 200 returns binary DOCX bytes, not JSON:
-
-```text
-Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
-Content-Disposition: attachment; filename="meeting_protocol.docx"
+```bash
+curl --fail-with-body 'http://127.0.0.1:8000/transcribe?language=ru' -F 'file=@/absolute/path/meeting.mp3'
+curl --fail-with-body 'http://127.0.0.1:8000/analyze-audio?language=ru' -F 'file=@/absolute/path/meeting.mp3'
 ```
 
-The document has the heading `Meeting Protocol`, numbered Summary, Action Items,
-and Transcript sections, and a four-column assignment table. Missing owner or
-deadline is displayed as `Не определено`. Export generation failures handled by
-the endpoint return HTTP 500 with a generic `detail` string.
+`/transcribe` response shape (illustrative text/times, not an inference result):
 
-## Integration notes for the team
+```json
+{
+  "text": "распознанный текст",
+  "transcript": [{"speaker":null,"start":0.0,"end":5.0,"text":"распознанный текст"}],
+  "language": "ru",
+  "diarization_available": false,
+  "warnings": ["Диаризация не подключена: speaker=null. Имена по голосу не определяются."]
+}
+```
 
-Audio developer: map `transcribe_audio()` output `full_text` to request `text`, or
-map its `segments` to request `transcript`. Do not send the audio output dictionary
-unchanged: fields such as `language`, `segments`, and `full_text` are not API input
-keys. Send only the supported segment fields, with `speaker: null` if unavailable.
-No audio upload or transcription happens in this API.
+`/analyze-audio` returns `{protocol: MeetingProtocol, language, diarization_available,
+warnings}`. **Send only `response.protocol` to `/export-docx`, not the envelope.**
+The standalone adapter does no diarization and always uses speaker=null. Warnings
+also explain recognition and extraction limitations. Display them in the frontend.
 
-Frontend developer: use `/health` for availability, `/analyze` for protocol JSON,
-and pass that protocol to `/export-docx` to download a Blob. Check HTTP status
-before decoding a response or saving a file. For a frontend on another port, use
-its local development proxy to this API; CORS is not configured. Display missing
-values as `Не определено`, keeping the underlying JSON values null.
+Limits: file 32 MiB, complete multipart body 32 MiB + 64 KiB, other request bodies
+2 MiB. Validation checks streamed bodies even without Content-Length. User filenames
+are never used as storage paths. Temporary files and upload handles are cleaned up
+on normal success and failure. Abrupt process termination can leave OS temporary
+files; the server does not intentionally persist recordings or protocols.
 
-## Local verification
+| HTTP status | Meaning |
+|---|---|
+| 413 | File/body limit exceeded |
+| 415 | Unsupported filename extension |
+| 422 | Invalid JSON/query/metadata, empty or undecodable audio, no recognized speech |
+| 503 | Missing model/dependency, unavailable selected adapter, or inference busy |
+| 500 | Internal analysis, adapter, or export failure |
+
+Errors have a `detail` string or validation list. Validation entries contain loc,
+msg, type, not the submitted meeting text. Internal exception details are hidden.
+
+## Export
+
+`POST /export-docx` accepts the complete MeetingProtocol JSON. It returns DOCX bytes
+with Content-Type `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
+and `Content-Disposition: attachment; filename="meeting_protocol.docx"`.
+The document contains title, summary, a four-column assignment table and transcript.
+Missing owner/deadline/confidence displays as Не определено. Export uses python-docx
+in memory. Invalid protocol → 422; internal export failure → 500.
+
+```bash
+curl --fail-with-body -sS http://127.0.0.1:8000/analyze -H 'Content-Type: application/json' -d '{"text":"Айнур Каировна, проверьте договор с подрядчиком."}' -o /tmp/hackalem-protocol.json
+curl --fail-with-body -sS http://127.0.0.1:8000/export-docx -H 'Content-Type: application/json' --data-binary @/tmp/hackalem-protocol.json -o /tmp/hackalem-protocol.docx
+```
+
+## Team boundaries
+
+See [INTEGRATION.md](INTEGRATION.md) for the inspected audio participant's real
+interface, the optional team bridge, and frontend usage. The backend defaults to
+standalone and needs no untracked ai/ files. The current team module implements no
+diarization. A future real adapter must preserve labels/timestamps and set the
+availability flag truthfully. No synthetic speaker alternation is implemented.
+
+## Verification
 
 ```bash
 python -c 'from backend.main import app; print(app.title)'
-python -m unittest discover -s tests -p test_backend_services.py -v
-curl -f http://127.0.0.1:8000/health
+python -m unittest discover -s tests -p 'test_backend*.py' -v
+# Start the server before smoke tests:
+python backend/scripts/smoke_test.py
+python backend/scripts/smoke_test.py --audio '/absolute/path/meeting.mp3'
 ```
 
-Use the realistic three-task sample, then export the returned protocol:
+The smoke script writes protocol JSON and DOCX into a temporary directory outside
+Git and prints its path. Inspect the result rather than treating HTTP 200 as proof
+of accuracy. Backend discovery deliberately excludes the pre-existing AI/Ollama
+`tests/test_analysis.py`; it and the other participant's files are unchanged.
+The realistic sample expects Гульмира / 15 октября, Тимур / 30 сентября, Айнур / null.
+See [TEST_REPORT.md](TEST_REPORT.md) for independently executed checks.
 
-```bash
-python -c 'import json; from pathlib import Path; print(json.dumps({"text": Path("tests/sample_transcript.txt").read_text(encoding="utf-8")}, ensure_ascii=False))' > /tmp/hackalem-request.json
-curl --fail-with-body -sS http://127.0.0.1:8000/analyze \
-  -H 'Content-Type: application/json' \
-  --data-binary @/tmp/hackalem-request.json -o /tmp/hackalem-protocol.json
-curl --fail-with-body -sS http://127.0.0.1:8000/export-docx \
-  -H 'Content-Type: application/json' \
-  --data-binary @/tmp/hackalem-protocol.json -o /tmp/hackalem-protocol.docx
-```
+## Analyzer limits
 
-Expected assignments: Гульмира Сериковна / 15 октября; Тимур Болатович /
-30 сентября; Айнур Каировна / null. These CLI examples explicitly save their
-outputs locally; the server itself keeps document generation in memory.
-Keep test discovery restricted to backend tests: the older `test_analysis.py`
-targets another participant's previous Ollama implementation.
+Local finite rules recognize imperative verbs, explicit addressees/owner labels,
+and selected Russian/Kazakh deadline phrases. The archive's broader vocabulary and
+explicit adjacent metadata handling are integrated. A narrow additional rule handles
+explicit “пусть Ерлан … подготовит” assignments, separating a following “а вы …”
+clause so the first owner/deadline cannot leak into it. A conflicting pair of deadlines
+in one fragment remains null. Relative dates stay relative (the leading до/к may
+be removed); no calendar date/year is inferred. Summary selects up to three source
+phrases, capped at 1,200 characters, rather than summarizing every meeting topic.
 
-## Analyzer boundary and limitations
+No inferred assignment from speakers, no general pronoun resolution, no reliable
+cross-turn corrections. Adjacent fragments with the same speaker can be joined;
+when speaker is unknown this can join unrelated phrases. Compound tasks may remain
+one item. Negations/questions/conditions may be skipped; false positives and missed
+tasks remain possible. Scores are heuristics, not calibrated probabilities. A few
+Kazakh/mixed template tests do not establish full language support. Self-commitment
+forms such as “я подготовлю” are not comprehensively supported.
 
-`backend.services.protocol_analyzer.build_protocol()` is the API adapter. It calls
-`ai.summarization.summarize_transcript()` and
-`ai.task_extraction.extract_action_items()`. A future local LLM adapter can replace
-those calls while preserving MeetingProtocol and the routes. The current checkout
-must include those local AI files; they were untracked when this backend was
-verified, and must be supplied through the AI participant's normal integration.
-
-The existing rules support a finite set of Russian/Kazakh verbs and date phrases.
-They do not handle every paraphrase (for example, `представьте` and
-`на следующей неделе` are not currently recognized). Relative deadlines such as
-`до пятницы` stay as spoken; no meeting date or year is invented. Ambiguous,
-negative, conditional, and question-like fragments may be skipped. Compound
-assignments may remain one item, identical items may be deduplicated, and
-cross-sentence corrections/coreference are not resolved. Regex extraction can
-both miss tasks and produce false positives; review before treating a protocol
-as authoritative. Summary selects up to three source sentences with a length cap;
-it is not a semantic summary of the whole meeting.
-
-Generated DOCX files and Python caches are ignored by Git. Do not commit private
-meeting samples or credentials. No commits or pushes are part of the backend
-verification workflow.
+Replace local_analysis through build_protocol for a future local LLM without
+changing routes or MeetingProtocol. The backend is an MVP, not a completed team
+product: actual UI integration and real diarization still require the teammates.

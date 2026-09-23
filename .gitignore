@@ -5,3 +5,9 @@ venv/
 .env
 .env.*
 *.docx
+.DS_Store
+/models/
+/recordings/
+/samples/*.mp3
+/samples/*.wav
+/:memory:.ses

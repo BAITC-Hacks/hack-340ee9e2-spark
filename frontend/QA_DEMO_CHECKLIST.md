@@ -1,0 +1,21 @@
+# Frontend QA
+
+- [ ] Page loads correctly
+- [ ] .mp3 file picker works
+- [ ] .mpeg file picker works
+- [ ] MP3/MPEG drag-and-drop works
+- [ ] Selected filename is displayed
+- [ ] Invalid file types are rejected
+- [ ] Empty submission shows an error
+- [ ] Meeting date works
+- [ ] Optional participant count works
+- [ ] Processing/loading state prevents duplicate requests
+- [ ] Backend unavailable state is displayed honestly
+- [ ] Backend failure never shows fake results
+- [ ] Summary renders backend response
+- [ ] Transcript renders timestamp + speaker + text
+- [ ] Tasks render action + responsible + deadline + evidence
+- [ ] Missing responsible/deadline displays "Не указан"
+- [ ] DOCX remains disabled before a valid backend document
+- [ ] DOCX download works after backend integration
+- [ ] Laptop layout remains readable

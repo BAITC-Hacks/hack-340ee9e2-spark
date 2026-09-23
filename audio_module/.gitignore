@@ -7,3 +7,8 @@
 !cli.py
 !requirements.txt
 !CHECK.md
+!align.py
+!diarize_worker.py
+!download_diarization.py
+!requirements-diarization.txt
+!test_alignment.py

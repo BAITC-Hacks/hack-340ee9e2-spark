@@ -1,6 +1,7 @@
 """Separate explicit model download from strictly local transcription."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 import sys
@@ -39,6 +40,14 @@ def main() -> int:
     command.add_argument("--max-seconds", type=float, default=None)
     command.add_argument("--language", choices=("auto", "ru", "kk"), default="auto")
     command.add_argument("--output", type=Path, default=MODULE_DIR / "results" / "transcript.json")
+    from .diarize import DEFAULT_DIARIZATION_MODEL, DEFAULT_DIARIZATION_PYTHON
+    command = commands.add_parser('diarize', help='Добавить локальную диаризацию к готовому JSON')
+    command.add_argument('input', type=Path)
+    command.add_argument('--transcript', type=Path, required=True)
+    command.add_argument('--output', type=Path, default=MODULE_DIR / 'results' / 'diarized.json')
+    command.add_argument('--model-dir', type=Path, default=DEFAULT_DIARIZATION_MODEL)
+    command.add_argument('--python-executable', type=Path, default=DEFAULT_DIARIZATION_PYTHON)
+    command.add_argument('--timeout-seconds', type=float, default=600)
     args = parser.parse_args()
     try:
         if args.command == "download":
@@ -46,6 +55,18 @@ def main() -> int:
             return 0
         if args.output.suffix.lower() != ".json":
             raise ValueError("Укажите выходной файл с расширением .json.")
+        if args.command == 'diarize':
+            from .diarize import add_diarization
+            if args.output.resolve() == args.transcript.resolve():
+                raise ValueError('Укажите отдельный JSON, чтобы сохранить исходную транскрибацию.')
+            transcript = json.loads(args.transcript.read_text(encoding='utf-8'))
+            result = add_diarization(args.input, transcript, model_dir=args.model_dir,
+                                     python_executable=args.python_executable,
+                                     timeout_seconds=args.timeout_seconds)
+            save_json(result, args.output)
+            print(f"JSON сохранён. Диаризация: {result['diarization']['status']}; "
+                  f"код: {result['diarization'].get('code', 'none')}. Текст не выводится.")
+            return 0 if result['diarization']['status'] in ('ok', 'no_speech_detected') else 2
         result = transcribe_mp3(
             args.input, model_dir=args.model_dir, max_seconds=args.max_seconds,
             language=None if args.language == "auto" else args.language,

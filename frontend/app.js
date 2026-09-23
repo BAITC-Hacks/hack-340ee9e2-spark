@@ -1,21 +1,19 @@
 "use strict";
 
-// API CONFIGURATION: provisional contract; replace these routes with the backend team's API.
-// POST multipart: file, meeting_date, optional num_speakers. Response: {job_id, status}.
-// GET status: {status, stage?, progress? (0..100), error?}. Success status: completed.
-// GET result: {summary: string[], transcript: [{id?, start, speaker, text}],
-// tasks: [{task, responsible?, deadline?, evidence?, timestamp?}], document_url?: string}.
-// document_url must reference an existing DOCX on the configured backend origin.
+// API CONFIGURATION: feature/backend-uldana (backend/main.py and backend/schemas.py).
+// Separate local frontend servers connect directly to FastAPI; configure FRONTEND_ORIGINS there.
+// POST analyzeAudio: FormData containing only file; response {protocol, language,
+// diarization_available, warnings}. No polling or backend stage telemetry exists.
+// POST exportDocx: the unchanged protocol as JSON; response is a DOCX blob.
 const API = Object.freeze({
-  baseUrl: location.protocol === "file:" ? "http://127.0.0.1:8000" : location.origin,
-  health: "/api/health",
-  upload: "/api/meetings",
-  status: (id) => `/api/meetings/${encodeURIComponent(id)}/status`,
-  result: (id) => `/api/meetings/${encodeURIComponent(id)}/result`,
-  pollIntervalMs: 1800,
+  baseUrl: "http://127.0.0.1:8000",
+  health: "/health",
+  transcribe: "/transcribe",
+  analyzeAudio: "/analyze-audio",
+  exportDocx: "/export-docx",
   requestTimeoutMs: 30000,
-  uploadTimeoutMs: 120000,
-  maxPollingMs: 60 * 60 * 1000,
+  analysisTimeoutMs: 60 * 60 * 1000,
+  exportTimeoutMs: 120000,
 });
 
 const $ = (id) => document.getElementById(id);
@@ -27,8 +25,13 @@ const labels = {
   generating: "Формирование протокола", completed: "Готово",
   error: "Ошибка", offline: "Backend недоступен",
 };
-const state = {file: null, busy: false, documentUrl: null, transcript: []};
+const state = {file: null, busy: false, protocol: null, transcript: [], diarizationAvailable: null, exported: false};
 const stageElements = [...document.querySelectorAll("[data-stage]")];
+const warningsElement = document.createElement("p");
+warningsElement.className = "processing-note";
+warningsElement.setAttribute("role", "status");
+warningsElement.hidden = true;
+document.querySelector(".results-heading").after(warningsElement);
 
 class ApiError extends Error {
   constructor(message, offline = false) { super(message); this.offline = offline; }
@@ -38,19 +41,35 @@ function localUrl(path) {
   const base = new URL(API.baseUrl);
   const url = new URL(path, `${base.origin}/`);
   if (!["http:", "https:"].includes(url.protocol) || url.origin !== base.origin || url.username || url.password) {
-    throw new ApiError("Сервер вернул недопустимый адрес документа.");
+    throw new ApiError("Некорректный адрес локального API.");
   }
   return url.href;
 }
 
 async function request(path, options = {}, asBlob = false) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.body ? API.uploadTimeoutMs : API.requestTimeoutMs);
+  const timeoutMs = path === API.analyzeAudio ? API.analysisTimeoutMs : asBlob ? API.exportTimeoutMs : API.requestTimeoutMs;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(localUrl(path), {...options, signal: controller.signal, redirect: "error", cache: "no-store"});
     if (!response.ok) {
-      if ([404, 502, 503, 504].includes(response.status)) throw new ApiError("Backend недоступен. Проверьте запуск локального сервера и адрес API.", true);
-      throw new ApiError(`Не удалось выполнить запрос (HTTP ${response.status}). Попробуйте ещё раз.`);
+      const messages = {
+        404: "API не найден. Проверьте адрес и версию backend.",
+        413: "Файл слишком большой. Максимальный размер аудио: 32 МиБ.",
+        415: "Формат аудио не поддерживается. Выберите MP3 / MPEG.",
+        422: "Не удалось проверить данные или распознать речь. Проверьте запись.",
+        500: "Ошибка обработки на сервере. Попробуйте ещё раз или проверьте backend.",
+        502: "Backend недоступен. Проверьте запуск локального сервера.",
+        503: "Backend недоступен: обработчик занят или локальная модель не готова.",
+        504: "Backend не ответил вовремя. Проверьте локальный сервер.",
+      };
+      let detail = "";
+      try {
+        const body = await response.json();
+        if (typeof body.detail === "string") detail = body.detail.trim();
+      } catch { /* A proxy may return a non-JSON error page. */ }
+      const message = messages[response.status] || `Не удалось выполнить запрос (HTTP ${response.status}).`;
+      throw new ApiError(`${message}${detail ? ` ${detail}` : ""}`, [502, 503, 504].includes(response.status));
     }
     if (asBlob) {
       const type = (response.headers.get("content-type") || "").split(";")[0].trim();
@@ -84,11 +103,13 @@ function setStatus(status, description, progress) {
   else $("progress").value = status === "completed" ? 100 : 0;
   const current = stages.indexOf(status);
   stageElements.forEach((item, index) => {
-    const complete = status === "completed" || (current >= 0 && index < current);
-    const active = index === current;
+    const unavailable = item.dataset.stage === "diarizing" && state.diarizationAvailable === false;
+    const waitingForExport = item.dataset.stage === "generating" && !state.exported;
+    const complete = status === "completed" && !unavailable && !waitingForExport;
+    const active = index === current && !unavailable;
     item.className = complete ? "complete" : active ? "active" : "";
     item.querySelector(".stage-icon").textContent = complete ? "✓" : String(index + 1);
-    item.querySelector(".stage-state").textContent = active ? "В процессе" : "";
+    item.querySelector(".stage-state").textContent = unavailable ? "Недоступно" : active ? (status === "generating" ? "Экспорт" : "Ориентировочно") : status === "completed" && waitingForExport ? "При скачивании" : "";
     if (active) item.setAttribute("aria-current", "step"); else item.removeAttribute("aria-current");
   });
 }
@@ -99,11 +120,15 @@ function setBusy(busy) {
   state.busy = busy;
   ["audio-file", "remove-file", "process-button", "meeting-date", "speaker-count"].forEach((id) => { $(id).disabled = busy; });
   $("upload-form").setAttribute("aria-busy", String(busy));
-  $("download-button").disabled = busy || !state.documentUrl;
+  $("download-button").disabled = busy || !state.protocol;
 }
 
 function resetResults() {
-  state.documentUrl = null;
+  state.protocol = null;
+  state.diarizationAvailable = null;
+  state.exported = false;
+  warningsElement.hidden = true;
+  warningsElement.textContent = "";
   state.transcript = [];
   ["summary-list", "transcript-list", "task-list"].forEach((id) => $(id).replaceChildren());
   ["summary-empty", "transcript-empty", "tasks-empty"].forEach((id) => { $(id).hidden = false; });
@@ -156,29 +181,33 @@ function timestamp(value) {
 }
 function nonempty(value) { return typeof value === "string" && value.trim() ? value.trim() : null; }
 
-function renderResults(data) {
-  if (!data || !Array.isArray(data.summary) || !Array.isArray(data.transcript) || !Array.isArray(data.tasks) ||
-      data.summary.some((point) => !nonempty(point)) ||
+function renderResults(result) {
+  const data = result?.protocol;
+  if (!data || !nonempty(data.summary) || !Array.isArray(data.transcript) || !Array.isArray(data.action_items) ||
+      typeof result.diarization_available !== "boolean" || !Array.isArray(result.warnings) ||
+      result.warnings.some((warning) => typeof warning !== "string") ||
       data.transcript.some((segment) => !segment || typeof segment.text !== "string") ||
-      data.tasks.some((task) => !task || !nonempty(task.task))) {
-    throw new ApiError("Формат результата не соответствует API: ожидаются summary, transcript и tasks.");
+      data.action_items.some((task) => !task || !nonempty(task.text) || !nonempty(task.source_fragment))) {
+    throw new ApiError("Некорректный ответ API: ожидается protocol с summary, transcript и action_items.");
   }
-  const documentUrl = nonempty(data.document_url) ? localUrl(data.document_url) : null;
+  state.diarizationAvailable = result.diarization_available;
+  const warnings = [...result.warnings];
+  if (!state.diarizationAvailable) warnings.unshift("Разделение говорящих недоступно. Реплики не привязаны к участникам.");
+  warningsElement.textContent = [...new Set(warnings.filter(Boolean))].join(" · ");
+  warningsElement.hidden = !warningsElement.textContent;
+  // Summary is backend-authored text, not an array. Preserve its content without inventing points.
+  const summary = data.summary.split(/\r?\n/).map((point) => point.trim()).filter(Boolean);
   // Keep segment IDs and independent fields for a future editor/save API.
   state.transcript = data.transcript.map((segment, index) => ({...segment, id: segment.id ?? index}));
-  data.summary.forEach((point) => $("summary-list").append(node("li", "", point)));
-  $("summary-count").textContent = String(data.summary.length);
-  $("summary-empty").hidden = data.summary.length > 0;
-  $("summary-list").hidden = !data.summary.length;
-  if (!data.summary.length) $("summary-empty").querySelector("p").textContent = "Сервер не вернул ключевые выводы.";
-  const speakers = new Map();
+  summary.forEach((point) => $("summary-list").append(node("li", "", point)));
+  $("summary-count").textContent = String(summary.length);
+  $("summary-empty").hidden = true;
+  $("summary-list").hidden = false;
   state.transcript.forEach((segment) => {
     const row = node("div", "transcript-segment");
     row.dataset.segmentId = String(segment.id);
     const content = node("div", "segment-content");
-    const sourceSpeaker = nonempty(segment.speaker) || (Number.isFinite(segment.speaker) ? String(segment.speaker) : null);
-    if (sourceSpeaker && !speakers.has(sourceSpeaker)) speakers.set(sourceSpeaker, speakers.size + 1);
-    const label = sourceSpeaker ? (/^SPEAKER[_ ]?\d+$/i.test(sourceSpeaker) || /^\d+$/.test(sourceSpeaker) ? `Говорящий ${speakers.get(sourceSpeaker)}` : sourceSpeaker) : "Говорящий не указан";
+    const label = state.diarizationAvailable ? nonempty(segment.speaker) || "Говорящий не указан" : "Говорящий не определён";
     const speaker = node("span", "speaker", label);
     speaker.dataset.field = "speaker";
     const text = node("p", "transcript-text", segment.text);
@@ -191,25 +220,19 @@ function renderResults(data) {
   $("transcript-empty").hidden = data.transcript.length > 0;
   $("transcript-list").hidden = !data.transcript.length;
   if (!data.transcript.length) $("transcript-empty").querySelector("p").textContent = "Сервер не вернул реплики.";
-  data.tasks.forEach((task) => {
+  data.action_items.forEach((task) => {
     const row = node("tr");
-    const evidence = nonempty(task.evidence);
-    const time = timestamp(task.timestamp);
-    [task.task, nonempty(task.responsible), nonempty(task.deadline), evidence ? `${time !== "—" ? `${time} · ` : ""}${evidence}` : null].forEach((value) => {
+    [task.text, nonempty(task.responsible), nonempty(task.deadline), task.source_fragment].forEach((value) => {
       row.append(node("td", value ? "" : "missing", value || "Не указан"));
     });
     $("task-list").append(row);
   });
-  $("task-count").textContent = String(data.tasks.length);
-  $("tasks-empty").hidden = data.tasks.length > 0;
-  if (!data.tasks.length) $("tasks-empty").querySelector("p").textContent = "В результате обработки поручения отсутствуют.";
+  $("task-count").textContent = String(data.action_items.length);
+  $("tasks-empty").hidden = data.action_items.length > 0;
+  if (!data.action_items.length) $("tasks-empty").querySelector("p").textContent = "В результате обработки поручения отсутствуют.";
   $("result-state").textContent = "Результаты обработки";
-  if (documentUrl) {
-    state.documentUrl = documentUrl;
-    $("document-note").textContent = "Документ предоставлен сервером.";
-  } else {
-    $("document-note").textContent = "Сервер ещё не предоставил DOCX-документ.";
-  }
+  state.protocol = data;
+  $("document-note").textContent = "Протокол готов. DOCX будет сформирован при скачивании.";
 }
 
 async function processMeeting(event) {
@@ -220,28 +243,19 @@ async function processMeeting(event) {
   if (!$("meeting-date").reportValidity() || !$("speaker-count").reportValidity()) return;
   resetResults();
   setBusy(true);
-  setStatus("ready", "Отправка записи на локальный сервер…");
+  const progressNote = "Ориентировочный этап интерфейса. Сервер не сообщает текущий этап; ожидаем результат.";
+  setStatus("preparing", progressNote);
+  // These timers guide the UI only: no percentages or completed steps before the response.
+  const progressTimers = [
+    setTimeout(() => setStatus("transcribing", progressNote), 2000),
+    setTimeout(() => setStatus("analyzing", progressNote), 8000),
+  ];
   try {
     const form = new FormData();
     form.append("file", state.file);
-    form.append("meeting_date", $("meeting-date").value);
-    if ($("speaker-count").value) form.append("num_speakers", $("speaker-count").value);
-    let job = await request(API.upload, {method: "POST", body: form});
+    // Meeting date and participant count are not accepted by the current backend API.
+    const result = await request(API.analyzeAudio, {method: "POST", body: form});
     connection(true);
-    if (!job || !["string", "number"].includes(typeof job.job_id) || String(job.job_id).trim() === "") throw new ApiError("Сервер не вернул идентификатор задания.");
-    const id = job.job_id;
-    const started = Date.now();
-    while (true) {
-      if (!job || typeof job.status !== "string") throw new ApiError("Сервер не вернул статус задания.");
-      if (["failed", "error"].includes(job.status)) throw new ApiError(nonempty(job.error) || "Не удалось обработать запись. Попробуйте другой файл MP3 / MPEG.");
-      if (job.status === "completed") break;
-      const stage = stages.includes(job.stage) ? job.stage : stages.includes(job.status) ? job.status : null;
-      setStatus(stage || "processing", stage ? "Выполняется на локальном сервере." : "Ожидаем сведения о текущем этапе от сервера.", Number.isFinite(job.progress) ? Math.min(99, job.progress) : undefined);
-      if (Date.now() - started > API.maxPollingMs) throw new ApiError("Ожидание результата превысило 60 минут. Проверьте состояние задания на сервере.");
-      await new Promise((resolve) => setTimeout(resolve, API.pollIntervalMs));
-      job = await request(API.status(id));
-    }
-    const result = await request(API.result(id));
     renderResults(result);
     setBusy(false);
     setStatus("completed", "Результаты совещания получены с локального сервера.", 100);
@@ -250,7 +264,7 @@ async function processMeeting(event) {
     if (error.offline) connection(false);
     setStatus(error.offline ? "offline" : "error", "Протокол не сформирован. Можно повторить попытку.");
     showError(error.message);
-  }
+  } finally { progressTimers.forEach(clearTimeout); }
 }
 
 $("upload-form").addEventListener("submit", processMeeting);
@@ -271,29 +285,40 @@ window.addEventListener("dragover", (event) => event.preventDefault());
 window.addEventListener("drop", (event) => event.preventDefault());
 
 $("download-button").addEventListener("click", async () => {
-  if (!state.documentUrl || state.busy) return;
+  if (!state.protocol || state.busy) return;
   clearError();
   setBusy(true);
+  setStatus("generating", "Сервер формирует DOCX из полученного протокола.");
   try {
-    const blob = await request(state.documentUrl, {}, true);
+    const blob = await request(API.exportDocx, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(state.protocol),
+    }, true);
     const url = URL.createObjectURL(blob);
     const link = node("a");
     link.href = url;
-    link.download = "meeting-protocol.docx";
+    link.download = "meeting_protocol.docx";
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
     connection(true);
+    state.exported = true;
+    $("document-note").textContent = "DOCX получен с сервера.";
+    setBusy(false);
+    setStatus("completed", "Протокол и DOCX получены с локального сервера.", 100);
   } catch (error) {
     if (error.offline) connection(false);
+    setBusy(false);
+    setStatus(error.offline ? "offline" : "error", "Не удалось скачать DOCX. Результаты сохранены на странице; повторите скачивание.");
     showError(`Не удалось скачать документ. ${error.message}`);
   } finally { setBusy(false); }
 });
 
 const today = new Date();
 $("meeting-date").value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-// A health failure never invents a processing outcome or overwrites an active job.
-request(API.health).then(() => { if (!state.busy) connection(true); }).catch(() => {
-  if (state.busy) return;
+// Ignore a late health response after the user has started interacting with a recording.
+request(API.health).then(() => { if (!state.busy && !state.file && !state.protocol) connection(true); }).catch(() => {
+  if (state.busy || state.file || state.protocol) return;
   connection(false);
   if (!state.file) setStatus("offline", "Запустите локальный сервер. Запись можно выбрать заранее.");
 });

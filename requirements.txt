@@ -1,0 +1,4 @@
+# One real audio implementation plus FastAPI/text analysis/DOCX.
+# Community-1 stays in audio_module/.venv-diarization; do not install PyTorch here.
+-r requirements-backend.txt
+-r audio_module/requirements.txt

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Spark — протокол совещания</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./index.html" aria-label="Spark, главная"><span class="brand-mark" aria-hidden="true">s</span>spark<span class="brand-divider"></span><span class="brand-caption">MEETING WORKSPACE</span></a>
+    <span class="event-label">HackAlem AI <span>/</span> Team Spark</span>
+  </header>
+  <main>
+    <section class="intro" aria-labelledby="page-title">
+      <div><p class="eyebrow">ИЗ РАЗГОВОРА В РЕШЕНИЯ</p><h1 id="page-title">Протокол совещания</h1><p class="lead">Главное, сказанное на встрече. Поручения, которые не потеряются.</p></div>
+      <div class="privacy"><span class="privacy-badge"><span aria-hidden="true">●</span> Локальная обработка</span><p>Аудио и текст совещания не отправляются<br class="desktop-break"> во внешние облачные API.</p></div>
+    </section>
+    <nav class="workflow" aria-label="Путь создания протокола"><span class="current"><b>01</b> MP3 / MPEG</span><span aria-hidden="true">→</span><span><b>02</b> Обработка</span><span aria-hidden="true">→</span><span><b>03</b> Саммари / Транскрипт / Поручения</span><span aria-hidden="true">→</span><span><b>04</b> DOCX</span></nav>
+    <div class="workspace">
+      <section class="upload-section" aria-labelledby="upload-title">
+        <div class="section-heading"><h2 id="upload-title"><span class="section-number">01</span> Запись встречи</h2><span class="minor-label">MP3 / MPEG · до 10 минут</span></div>
+        <form id="upload-form" novalidate>
+          <div id="drop-zone" class="drop-zone">
+            <div class="upload-symbol" aria-hidden="true">↑</div>
+            <h3>Перетащите MP3 / MPEG сюда</h3><p>или выберите запись на компьютере</p>
+            <label class="file-picker" for="audio-file">Выбрать файл<input id="audio-file" name="file" type="file" accept=".mp3,.mpeg,audio/mpeg,audio/mp3"></label>
+            <span class="drop-footnote">Одна встреча — один протокол</span>
+          </div>
+          <div id="selected-file" class="selected-file" hidden><span class="file-type" aria-hidden="true">MP3 / MPEG</span><div class="file-details"><strong id="file-name"></strong><span id="file-size"></span></div><button type="button" id="remove-file" class="icon-button" aria-label="Удалить выбранный файл" title="Удалить файл">×</button></div>
+          <div class="meeting-fields"><label>Обработать<select id="audio-limit"><option value="60">Первые 60 секунд (демо)</option><option value="full">Всю запись (до 10 минут)</option></select></label></div>
+          <p class="processing-note">Для демо по умолчанию обрабатываем только первые 60 секунд. Даты и число участников автоматически не уточняются.</p>
+          <button id="process-button" class="primary-button" type="submit"><span>Сформировать протокол</span><span aria-hidden="true">→</span></button>
+        </form>
+      </section>
+      <section class="processing-section" aria-labelledby="processing-title">
+        <div class="section-heading"><h2 id="processing-title"><span class="section-number">02</span> Обработка</h2><span id="connection" class="connection">Не проверен</span></div>
+        <div class="status-heading"><span id="status-dot" class="status-dot"></span><h3 id="status-title" role="status" aria-live="polite">Ожидается загрузка</h3></div>
+        <p id="status-description" class="status-description">Запись ещё не выбрана.</p>
+        <progress id="progress" max="100" value="0" aria-label="Прогресс обработки"></progress>
+        <ol id="stages" class="stages"><li data-stage="preparing"><span class="stage-icon">1</span><div><strong>Подготовка аудио</strong><small>Проверка и подготовка записи</small></div><span class="stage-state"></span></li><li data-stage="transcribing"><span class="stage-icon">2</span><div><strong>Распознавание речи</strong><small>Текст с временными отметками</small></div><span class="stage-state"></span></li><li data-stage="diarizing"><span class="stage-icon">3</span><div><strong>Разделение говорящих</strong><small>Реплики каждого участника</small></div><span class="stage-state"></span></li><li data-stage="analyzing"><span class="stage-icon">4</span><div><strong>Анализ поручений</strong><small>Решения, ответственные и сроки</small></div><span class="stage-state"></span></li><li data-stage="generating"><span class="stage-icon">5</span><div><strong>Формирование протокола</strong><small>Саммари и итоговый документ</small></div><span class="stage-state"></span></li></ol>
+        <p class="processing-note">Русский · Қазақша · Смешанная речь</p>
+      </section>
+    </div>
+    <div id="error-message" class="error-message" role="alert" hidden></div>
+    <section class="results" aria-labelledby="results-title">
+      <div class="results-heading"><div><p class="eyebrow">РЕЗУЛЬТАТЫ ВСТРЕЧИ</p><h2 id="results-title">Всё важное в одном месте</h2></div><span id="result-state" class="result-state">Нет обработанной записи</span></div>
+      <div class="result-grid">
+        <article class="result-card summary-card"><div class="card-heading"><h3>Саммари</h3><span id="summary-count" class="count">0</span></div><div id="summary-empty" class="empty-state"><span class="empty-symbol" aria-hidden="true">≡</span><h4>Главное из разговора</h4><p>Ключевые выводы встречи появятся<br> после обработки записи.</p></div><ul id="summary-list" class="summary-list" hidden></ul></article>
+        <article class="result-card transcript-card"><div class="card-heading"><h3>Транскрипт</h3><span id="transcript-count" class="count">0 реплик</span></div><div id="transcript-empty" class="empty-state"><span class="empty-symbol transcript-symbol" aria-hidden="true">“</span><h4>У каждой реплики есть контекст</h4><p>Здесь будут текст, говорящие<br> и временные отметки.</p></div><div id="transcript-list" class="transcript-list" hidden></div></article>
+      </div>
+      <article class="result-card tasks-card"><div class="card-heading"><h3>Поручения</h3><span id="task-count" class="count">0</span></div><div class="table-scroll" tabindex="0" role="region" aria-label="Таблица поручений"><table><thead><tr><th scope="col">Поручение</th><th scope="col">Ответственный</th><th scope="col">Срок</th><th scope="col">Основание</th></tr></thead><tbody id="task-list"></tbody></table></div><div id="tasks-empty" class="tasks-empty"><h4>Пока нет поручений</h4><p>Договорённости и фрагменты-основания появятся после обработки.</p></div></article>
+      <div class="export-bar"><div class="export-description"><span class="document-icon" aria-hidden="true">W</span><div><h3>Итоговый протокол</h3><p id="document-note">Документ ещё не сформирован.</p></div></div><button id="download-button" class="download-button" disabled><span aria-hidden="true">↓</span> Скачать DOCX-протокол</button></div>
+    </section>
+    <footer><span>Spark / HackAlem AI</span><span>Встреча заканчивается. Решения остаются.</span></footer>
+  </main>
+</body>
+</html>

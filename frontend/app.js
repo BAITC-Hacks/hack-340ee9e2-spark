@@ -128,9 +128,10 @@ function selectFile(files) {
   $("audio-file").value = "";
   $("selected-file").hidden = true;
   const file = files[0];
-  if (files.length !== 1 || !/\.mp3$/i.test(file.name) || (file.type && !["audio/mpeg", "audio/mp3", "audio/x-mp3", "audio/x-mpeg", "application/octet-stream"].includes(file.type)) || file.size === 0) {
+  // Windows may report an empty or inconsistent MIME type; use the file extension.
+  if (files.length !== 1 || !/\.(mp3|mpeg)$/i.test(file.name) || file.size === 0) {
     setStatus("error", "Запись не выбрана.");
-    showError(files.length !== 1 ? "Выберите одну MP3-запись." : file.size === 0 ? "Файл пуст. Выберите другую MP3-запись." : "Неверный тип файла. Допускаются только MP3-файлы.");
+    showError(files.length !== 1 ? "Выберите одну запись MP3 / MPEG." : file.size === 0 ? "Файл пуст. Выберите другую запись MP3 / MPEG." : "Неверный тип файла. Допускаются только файлы MP3 / MPEG.");
     return;
   }
   state.file = file;
@@ -215,7 +216,7 @@ async function processMeeting(event) {
   event.preventDefault();
   if (state.busy) return;
   clearError();
-  if (!state.file) { showError("Файл не выбран. Добавьте MP3-запись совещания."); $("audio-file").focus(); return; }
+  if (!state.file) { showError("Файл не выбран. Добавьте запись совещания MP3 / MPEG."); $("audio-file").focus(); return; }
   if (!$("meeting-date").reportValidity() || !$("speaker-count").reportValidity()) return;
   resetResults();
   setBusy(true);
@@ -232,7 +233,7 @@ async function processMeeting(event) {
     const started = Date.now();
     while (true) {
       if (!job || typeof job.status !== "string") throw new ApiError("Сервер не вернул статус задания.");
-      if (["failed", "error"].includes(job.status)) throw new ApiError(nonempty(job.error) || "Не удалось обработать запись. Попробуйте другой MP3-файл.");
+      if (["failed", "error"].includes(job.status)) throw new ApiError(nonempty(job.error) || "Не удалось обработать запись. Попробуйте другой файл MP3 / MPEG.");
       if (job.status === "completed") break;
       const stage = stages.includes(job.stage) ? job.stage : stages.includes(job.status) ? job.status : null;
       setStatus(stage || "processing", stage ? "Выполняется на локальном сервере." : "Ожидаем сведения о текущем этапе от сервера.", Number.isFinite(job.progress) ? Math.min(99, job.progress) : undefined);

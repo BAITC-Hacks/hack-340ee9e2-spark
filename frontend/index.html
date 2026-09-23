@@ -18,18 +18,18 @@
       <div><p class="eyebrow">ИЗ РАЗГОВОРА В РЕШЕНИЯ</p><h1 id="page-title">Протокол совещания</h1><p class="lead">Главное, сказанное на встрече. Поручения, которые не потеряются.</p></div>
       <div class="privacy"><span class="privacy-badge"><span aria-hidden="true">●</span> Локальная обработка</span><p>Аудио и текст совещания не отправляются<br class="desktop-break"> во внешние облачные API.</p></div>
     </section>
-    <nav class="workflow" aria-label="Путь создания протокола"><span class="current"><b>01</b> MP3</span><span aria-hidden="true">→</span><span><b>02</b> Обработка</span><span aria-hidden="true">→</span><span><b>03</b> Саммари / Транскрипт / Поручения</span><span aria-hidden="true">→</span><span><b>04</b> DOCX</span></nav>
+    <nav class="workflow" aria-label="Путь создания протокола"><span class="current"><b>01</b> MP3 / MPEG</span><span aria-hidden="true">→</span><span><b>02</b> Обработка</span><span aria-hidden="true">→</span><span><b>03</b> Саммари / Транскрипт / Поручения</span><span aria-hidden="true">→</span><span><b>04</b> DOCX</span></nav>
     <div class="workspace">
       <section class="upload-section" aria-labelledby="upload-title">
-        <div class="section-heading"><h2 id="upload-title"><span class="section-number">01</span> Запись встречи</h2><span class="minor-label">MP3 · до 10 минут</span></div>
+        <div class="section-heading"><h2 id="upload-title"><span class="section-number">01</span> Запись встречи</h2><span class="minor-label">MP3 / MPEG · до 10 минут</span></div>
         <form id="upload-form" novalidate>
           <div id="drop-zone" class="drop-zone">
             <div class="upload-symbol" aria-hidden="true">↑</div>
-            <h3>Перетащите MP3 сюда</h3><p>или выберите запись на компьютере</p>
-            <label class="file-picker" for="audio-file">Выбрать файл<input id="audio-file" name="file" type="file" accept=".mp3,audio/mpeg"></label>
+            <h3>Перетащите MP3 / MPEG сюда</h3><p>или выберите запись на компьютере</p>
+            <label class="file-picker" for="audio-file">Выбрать файл<input id="audio-file" name="file" type="file" accept=".mp3,.mpeg,audio/mpeg,audio/mp3"></label>
             <span class="drop-footnote">Одна встреча — один протокол</span>
           </div>
-          <div id="selected-file" class="selected-file" hidden><span class="file-type" aria-hidden="true">MP3</span><div class="file-details"><strong id="file-name"></strong><span id="file-size"></span></div><button type="button" id="remove-file" class="icon-button" aria-label="Удалить выбранный файл" title="Удалить файл">×</button></div>
+          <div id="selected-file" class="selected-file" hidden><span class="file-type" aria-hidden="true">MP3 / MPEG</span><div class="file-details"><strong id="file-name"></strong><span id="file-size"></span></div><button type="button" id="remove-file" class="icon-button" aria-label="Удалить выбранный файл" title="Удалить файл">×</button></div>
           <div class="meeting-fields"><label>Дата совещания<input id="meeting-date" type="date" required></label><label>Участников <span class="optional">необязательно</span><input id="speaker-count" type="number" min="1" max="100" step="1" placeholder="Не указано"></label></div>
           <button id="process-button" class="primary-button" type="submit"><span>Сформировать протокол</span><span aria-hidden="true">→</span></button>
         </form>

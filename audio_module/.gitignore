@@ -1,0 +1,9 @@
+# Only source and instructions are allowed in this isolated module.
+*
+!.gitignore
+!__init__.py
+!transcribe.py
+!diarize.py
+!cli.py
+!requirements.txt
+!CHECK.md
